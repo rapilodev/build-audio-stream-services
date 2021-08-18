@@ -1,0 +1,37 @@
+#! /bin/sh
+
+if [ "$1" = "remove" ]; then
+
+    if [ -e /etc/logrotate.d/stream-services ]; then
+        rm /etc/logrotate.d/stream-services
+    fi
+
+    if [ -e /etc/init/stream-services.conf ]; then
+        rm /etc/init/stream-services.conf
+    fi
+
+    if [ -e /var/run/stream-services/stream-services.pid ]; then
+        rm /var/run/stream-services/stream-services.pid
+    fi
+
+    if [ -e /var/log/upstart/stream-services.log ]; then
+        rm -r /var/log/upstart/stream-services*
+    fi
+
+    if [ -e /var/log/stream-services/stream-services.log ]; then
+        rm -r /var/log/stream-services/stream-services*
+    fi
+fi
+
+if [ "$1" = "purge" ]; then
+    if [ -e /etc/stream-services/ ]; then
+        rm -r /etc/stream-services/
+    fi
+fi
+
+echo "reload systemd services"
+systemctl daemon-reload
+
+exit 0;
+
+#DEBHELPER#

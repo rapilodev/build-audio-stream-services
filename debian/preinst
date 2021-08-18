@@ -1,0 +1,16 @@
+#! /bin/sh -e
+
+/bin/systemctl 2>/dev/null | grep -q '\-\.mount'
+if [ "$?" = "0" ]; then
+    return 0
+else 
+    return 1
+fi
+
+if systemctl is-active stream-services; then
+	systemctl stop stream-services
+fi
+
+exit 0
+
+#DEBHELPER#

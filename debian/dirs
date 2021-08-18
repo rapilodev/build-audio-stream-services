@@ -1,0 +1,3 @@
+var/lib/audiostream
+var/log/stream-services
+var/run/stream-services

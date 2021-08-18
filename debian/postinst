@@ -1,0 +1,46 @@
+#! /bin/sh
+
+if ! getent group audiostream >/dev/null; then
+        addgroup --system audiostream
+fi
+
+if ! getent passwd audiostream >/dev/null; then
+        adduser --system --ingroup audiostream --home /var/lib/audiostream audiostream
+fi
+
+# add groups to user
+addgroup audiostream pulse
+addgroup audiostream pulse-access
+addgroup audiostream audio
+
+if [ -d /var/lib/stream-services/ ]; then
+  chown audiostream:audiostream /var/lib/stream-services/
+  chmod 0750 /var/lib/audiostream/
+fi
+
+if [ -d /var/run/stream-services/ ]; then
+  chown audiostream:audiostream /var/run/stream-services/
+  chmod 0775 /var/run/stream-services/
+fi
+
+if [ -d /var/log/stream-services/ ]; then
+  chgrp audiostream /var/log/stream-services/
+  chmod 0775 /var/log/stream-services/
+fi
+
+# set group
+chgrp audiostream /etc/stream-services/*.conf
+chgrp audiostream /etc/init/stream-services.conf
+chgrp audiostream /etc/logrotate.d/stream-services
+chmod 644 /etc/logrotate.d/stream-services
+
+chmod 0775 /bin/prepare-stream-services.sh
+
+echo "restart stream-services systemd service"
+systemctl daemon-reload
+systemctl enable stream-services
+systemctl start stream-services
+
+exit 0
+
+#DEBHELPER#

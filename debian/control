@@ -1,0 +1,13 @@
+Source: stream-services
+Section: sound
+Priority: optional
+Maintainer: Milan Chrobok <mc@radiopiloten.de>
+Build-Depends: debhelper (>= 10)
+Standards-Version: 4.5.0
+Homepage: https://launchpad.net/~mc-1/+archive/stream-services
+
+Package: stream-services
+Architecture: any
+Depends: ${misc:Depends}, quelcom, perl, libyaml-perl
+Description: create configuration based audio-stream instances
+

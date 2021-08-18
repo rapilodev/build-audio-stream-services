@@ -1,0 +1,9 @@
+#! /bin/sh
+
+if systemctl is-active stream-services; then
+	systemctl stop stream-services
+fi
+
+exit 0
+
+#DEBHELPER#
