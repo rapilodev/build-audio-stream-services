@@ -1,0 +1,97 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+use feature 'state';
+use URI;
+use YAML();
+use Data::Dumper;
+use File::Basename;
+
+my $etc_dir          = 'etc/stream-services';
+my $templates_dir    = $etc_dir . '/templates';
+my $ls_templates_dir = $templates_dir . '/liquidsoap';
+my $instances_dir    = "$etc_dir/instances";
+
+sub load_file {
+    my $file = shift;
+    open my $fh, '<', $file;
+    my $content = '';
+    while ( my $line = <$fh> ) { $content .= $line }
+    return $content;
+}
+
+sub save_file {
+    my ( $file, $content ) = @_;
+    mkdir dirname $file;
+    open my $fh, '>', $file or die "cannot write $file\n";
+    print $fh $content;
+    close $fh;
+}
+
+sub translate_url {
+    my $uri = shift;
+    return unless $uri;
+    if ( $uri =~ m!([a-z]+)?(:[a-z]+)(\@[a-z]+)(:[0-9]+)(/[a-z]+)! ) {
+        my $val = {};
+        $val->{user}  = $1 if $1;
+        $val->{pass}  = $2 if $2;
+        $val->{host}  = $3 if $3;
+        $val->{port}  = $4 if $4;
+        $val->{mount} = $5 if $5;
+        $val->{pass} =~ s{^\:}{};
+        $val->{port} =~ s{^\:}{};
+        $val->{host} =~ s{^\@}{};
+        return join ", ", map { qq{$_="$val->{$_}"} } sort keys %$val;
+    }
+    return $uri;
+}
+
+sub set_values {
+    my ( $service, $name, $values ) = @_;
+
+    my $path = "$ls_templates_dir/$name.conf";
+    die qq{unknown step "$name" in "$path.conf": template "$name.conf" does not exist\n}
+      unless -e $path;
+    my $template = load_file($path);
+    state $defaults = YAML::LoadFile("$ls_templates_dir/defaults.conf");
+    for my $key ( keys %$defaults ) {
+        next unless $key =~ /^$name/;
+        $values->{$key} //= $defaults->{$key};
+    }
+    for my $key ( sort { length $a <=> length $b } keys %$values ) {
+        my $value = $values->{$key};
+        $value = translate_url($value);
+        $template =~ s/<$key>/$value/g;
+    }
+    return $template;
+}
+
+sub deploy_liquidsoap_conf {
+    my ( $service, $conf ) = @_;
+    my $steps = $conf->{flow};
+    die "liquidsoap: missing steps" unless @$steps;
+
+    my $config = '';
+    for my $step (@$steps) {
+        $step = { $step => undef } if ref($step) ne 'HASH';
+        my ($name) = keys %$step;
+        my $values = [ values %$step ]->[0];
+        $values = { $name => $values } if ref($values) ne 'HASH';
+        $values->{"liquidsoap.service"} = $service;
+        $config .= set_values( $service, $name, $values );
+    }
+    save_file "$instances_dir/liquidsoap/$service.liq", $config;
+}
+
+sub deploy {
+    my ( $service, $config ) = @_;
+    if ($config->{liquidsoap}){
+        deploy_liquidsoap_conf( $service, $config->{liquidsoap} );
+        #deploy_liquidsoap_service( $service, $config->{liquidsoap} ) 
+    };
+}
+
+for my $file ( glob("$etc_dir/services/*.conf") ) {
+    my ($service) = $file =~ m!/([^/]+)\.conf!;
+    deploy( $service, YAML::LoadFile($file) );
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=stream services
+After=network.target
+
+[Service]
+Restart=always
+RestartSec=1s
+StartLimitInterval=0
+
+User=audiostream
+Group=audiostream
+
+PermissionsStartOnly=true
+
+ExecStartPre=/bin/prepare-stream-services.sh >>/var/log/stream-services/radio.log 2>&1
+ExecStart=/bin/sh -c 'liquidsoap /etc/stream-services/start.conf >>/var/log/stream-services/radio.log 2>&1'
+ExecReload=/bin/kill -HUP $(cat /var/run/stream-services/stream-services.pid) >>/var/log/stream-services/radio.log 2>&1
+
+[Install]
+WantedBy=multi-user.target
+
