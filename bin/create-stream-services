@@ -10,6 +10,7 @@ use File::Basename;
 my $etc_dir          = 'etc/stream-services';
 my $templates_dir    = $etc_dir . '/templates';
 my $ls_templates_dir = $templates_dir . '/liquidsoap';
+my $ic_templates_dir = $templates_dir . '/icecast';
 my $instances_dir    = "$etc_dir/instances";
 
 sub load_file {
@@ -22,16 +23,18 @@ sub load_file {
 
 sub save_file {
     my ( $file, $content ) = @_;
-    mkdir dirname $file;
+    my $dir = dirname($file);
+    mkdir $dir or die "cannot mkdir $dir, $!" unless -d $dir;
     open my $fh, '>', $file or die "cannot write $file\n";
     print $fh $content;
     close $fh;
 }
 
-sub translate_url {
+sub parse_url {
     my $uri = shift;
     return unless $uri;
-    if ( $uri =~ m!([a-z]+)?(:[a-z]+)(\@[a-z]+)(:[0-9]+)(/[a-z]+)! ) {
+    my $s = "[^:\@/]+";
+    if ( $uri =~ m!($s)?(:$s)(\@$s)(:[0-9]+)(/$s)! ) {
         my $val = {};
         $val->{user}  = $1 if $1;
         $val->{pass}  = $2 if $2;
@@ -41,9 +44,20 @@ sub translate_url {
         $val->{pass} =~ s{^\:}{};
         $val->{port} =~ s{^\:}{};
         $val->{host} =~ s{^\@}{};
-        return join ", ", map { qq{$_="$val->{$_}"} } sort keys %$val;
+        return $val;
     }
     return $uri;
+}
+
+sub generate_icecast_conf {
+    my ( $service, $values ) = @_;
+
+    my $config = load_file("$ic_templates_dir/icecast.conf");
+    for my $key ( sort { length $a <=> length $b } keys %$values ) {
+        my $value = $values->{$key};
+        $config =~ s/<$key>/$value/g;
+    }
+    save_file "$instances_dir/icecast/$service.conf", $config;
 }
 
 sub set_values {
@@ -53,15 +67,28 @@ sub set_values {
     die qq{unknown step "$name" in "$path.conf": template "$name.conf" does not exist\n}
       unless -e $path;
     my $template = load_file($path);
+    $values->{"service"} = $service if $name eq 'init';
     state $defaults = YAML::LoadFile("$ls_templates_dir/defaults.conf");
     for my $key ( keys %$defaults ) {
-        next unless $key =~ /^$name/;
-        $values->{$key} //= $defaults->{$key};
+        my ( $step, $var ) = split /\./, $key, 2;
+        next unless $var;
+        next unless $step =~ /^$name/;
+        $values->{$var} //= $defaults->{$key};
     }
+
     for my $key ( sort { length $a <=> length $b } keys %$values ) {
         my $value = $values->{$key};
-        $value = translate_url($value);
-        $template =~ s/<$key>/$value/g;
+        if ( $key =~ /url/ ) {
+            my $url_fields = parse_url($value);
+            if ( $name =~ /^output-icecast-/ and ref($url_fields) eq 'HASH' ) {
+                generate_icecast_conf( $service, $url_fields );
+            }
+            $value = ref($url_fields) eq 'HASH'
+              ? ( join ", ",
+                map { qq{$_="$url_fields->{$_}"} } sort keys %$url_fields )
+              : $url_fields;
+        }
+        $template =~ s/<$name.$key>/$value/g;
     }
     return $template;
 }
@@ -73,25 +100,28 @@ sub deploy_liquidsoap_conf {
 
     my $config = '';
     for my $step (@$steps) {
-        $step = { $step => undef } if ref($step) ne 'HASH';
+        $step = { $step => {} } if ref($step) ne 'HASH';
         my ($name) = keys %$step;
         my $values = [ values %$step ]->[0];
         $values = { $name => $values } if ref($values) ne 'HASH';
-        $values->{"liquidsoap.service"} = $service;
-        $config .= set_values( $service, $name, $values );
+        $values = {} unless $values;
+        $config .= "#$name\n" . set_values( $service, $name, $values ) . "\n";
     }
     save_file "$instances_dir/liquidsoap/$service.liq", $config;
 }
 
 sub deploy {
     my ( $service, $config ) = @_;
-    if ($config->{liquidsoap}){
+    mkdir $instances_dir or die "cannot create $instances_dir, $!" unless -d $instances_dir;
+    if ( $config->{liquidsoap} ) {
         deploy_liquidsoap_conf( $service, $config->{liquidsoap} );
-        #deploy_liquidsoap_service( $service, $config->{liquidsoap} ) 
-    };
+
+        #deploy_liquidsoap_service( $service, $config->{liquidsoap} )
+    }
 }
 
 for my $file ( glob("$etc_dir/services/*.conf") ) {
     my ($service) = $file =~ m!/([^/]+)\.conf!;
+    print "process $file\n";
     deploy( $service, YAML::LoadFile($file) );
 }
