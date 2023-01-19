@@ -6,12 +6,13 @@ use URI;
 use YAML();
 use Data::Dumper;
 use File::Basename;
+use File::Path qw(make_path);
 
 my $etc_dir          = 'etc/stream-services';
 my $templates_dir    = $etc_dir . '/templates';
 my $ls_templates_dir = $templates_dir . '/liquidsoap';
 my $ic_templates_dir = $templates_dir . '/icecast';
-my $instances_dir    = "$etc_dir/instances";
+my $instances_dir    = "instances";
 
 sub load_file {
     my $file = shift;
@@ -24,7 +25,8 @@ sub load_file {
 sub save_file {
     my ( $file, $content ) = @_;
     my $dir = dirname($file);
-    mkdir $dir or die "cannot mkdir $dir, $!" unless -d $dir;
+    make_path $dir or die "cannot mkdir $dir, $!" unless -d $dir;
+    print "save $file\n";
     open my $fh, '>', $file or die "cannot write $file\n";
     print $fh $content;
     close $fh;
@@ -37,11 +39,11 @@ sub parse_url {
     if ( $uri =~ m!($s)?(:$s)(\@$s)(:[0-9]+)(/$s)! ) {
         my $val = {};
         $val->{user}  = $1 if $1;
-        $val->{pass}  = $2 if $2;
+        $val->{password}  = $2 if $2;
         $val->{host}  = $3 if $3;
         $val->{port}  = $4 if $4;
         $val->{mount} = $5 if $5;
-        $val->{pass} =~ s{^\:}{};
+        $val->{password} =~ s{^\:}{};
         $val->{port} =~ s{^\:}{};
         $val->{host} =~ s{^\@}{};
         return $val;
@@ -57,10 +59,10 @@ sub generate_icecast_conf {
         my $value = $values->{$key};
         $config =~ s/<$key>/$value/g;
     }
-    save_file "$instances_dir/icecast/$service.conf", $config;
+    save_file "$instances_dir/etc/icecast/$service.conf", $config;
 }
 
-sub set_values {
+sub set_ls_values {
     my ( $service, $name, $values ) = @_;
 
     my $path = "$ls_templates_dir/$name.conf";
@@ -85,7 +87,15 @@ sub set_values {
             }
             $value = ref($url_fields) eq 'HASH'
               ? ( join ", ",
-                map { qq{$_="$url_fields->{$_}"} } sort keys %$url_fields )
+                map {
+                    my $key = $_;
+                    my $val = $url_fields->{$key};
+                    if ($val =~/^\d+$/){
+                        qq{$key=$val}
+                    } else {
+                        qq{$key="$val"}
+                    }
+                } sort keys %$url_fields )
               : $url_fields;
         }
         $template =~ s/<$name.$key>/$value/g;
@@ -105,23 +115,38 @@ sub deploy_liquidsoap_conf {
         my $values = [ values %$step ]->[0];
         $values = { $name => $values } if ref($values) ne 'HASH';
         $values = {} unless $values;
-        $config .= "#$name\n" . set_values( $service, $name, $values ) . "\n";
+        $config .= "#$name\n" . set_ls_values( $service, $name, $values ) . "\n";
     }
-    save_file "$instances_dir/liquidsoap/$service.liq", $config;
+    save_file "$instances_dir/etc/stream-services/$service.liq", $config;
+}
+
+sub deploy_liquidsoap_service {
+    my ( $service, $conf ) = @_;
+    my $template = load_file($templates_dir . '/systemd/system/liquidsoap.service');
+    state $defaults = YAML::LoadFile("$ls_templates_dir/defaults.conf");
+    $conf->{name} = $service;
+    for my $key ( keys %$defaults ) {
+        my ( $step, $var ) = split /\./, $key, 2;
+        next unless $var;
+        next unless $step =~ /^service/;
+        $conf->{$var} //= $defaults->{$key};
+    }
+    for my $key ( sort { length $a <=> length $b } keys %$conf ) {
+        my $value = $conf->{$key};
+        $template =~ s/<$key>/$value/g;
+    }
+    save_file "$instances_dir/etc/systemd/system/$service.service", $template;
 }
 
 sub deploy {
     my ( $service, $config ) = @_;
-    mkdir $instances_dir or die "cannot create $instances_dir, $!" unless -d $instances_dir;
-    if ( $config->{liquidsoap} ) {
-        deploy_liquidsoap_conf( $service, $config->{liquidsoap} );
-
-        #deploy_liquidsoap_service( $service, $config->{liquidsoap} )
-    }
+    make_path $instances_dir or die "cannot create $instances_dir, $!" unless -d $instances_dir;
+    deploy_liquidsoap_conf( $service, $config->{liquidsoap} ) if $config->{liquidsoap};
+    deploy_liquidsoap_service( $service, $config->{liquidsoap}->{service} ) if $config->{liquidsoap}->{service};
 }
 
 for my $file ( glob("$etc_dir/services/*.conf") ) {
     my ($service) = $file =~ m!/([^/]+)\.conf!;
-    print "process $file\n";
+    print "\nprocess $file\n";
     deploy( $service, YAML::LoadFile($file) );
 }
