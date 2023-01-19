@@ -1,0 +1,28 @@
+[Unit]
+Description=<name>
+After=network.target
+
+[Service]
+Restart=always
+RestartSec=1s
+StartLimitInterval=0
+
+User=<user>
+Group=<group>
+
+PermissionsStartOnly=true
+ExecStartPre=-/bin/bash -c 'pkill -f /etc/stream-services/<name>.liq'
+ExecStartPre=-/bin/bash -c 'mkdir -p /var/run/stream-services/'
+ExecStartPre=-/bin/bash -c 'chmod 775 /var/run/stream-services/'
+ExecStartPre=-/bin/bash -c 'chown <user> /var/run/stream-services/'
+ExecStartPre=-/bin/bash -c 'rm /var/run/stream-services/<name>.pid'
+ExecStartPre=-/bin/bash -c 'mkdir -p /var/log/stream-services/'
+ExecStartPre=-/bin/bash -c 'chmod 755 /var/log/stream-services/'
+ExecStartPre=-/bin/bash -c 'chown <user>:<group> /var/log/stream-services/'
+ExecStartPre=-/bin/bash -c 'chmod 664 /var/log/stream-services/<name>.log'
+ExecStartPre=-/bin/bash -c 'chown <user>:<group> /var/log/stream-services/<name>.log'
+ExecStart=/bin/sh -c '<liquidsoap.path> /etc/stream-services/<name>.liq >>/var/log/stream-services/<name>.log 2>&1'
+ExecReload=/bin/kill -HUP $(cat /var/run/stream-services/<name>.pid) >>/var/log/stream-services/<name>.log 2>&1
+
+[Install]
+WantedBy=multi-user.target
